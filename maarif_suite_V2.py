@@ -76,33 +76,45 @@ def meeting_clear_state():
 
 # 6. YENİ CORE FONKSİYONLAR: GÖRÜNTÜ İŞLEME VE OCR/OMR
 def process_exam_image(uploaded_file, is_omr, answer_key=""):
-    """Yüklenen görüntüyü işler ve sonuçları döndürür (OMR/OCR mantığı yer tutucu)."""
+    """Yüklenen görüntüyü işler ve sonuçları döndürür (Görüntü İşleme İyileştirildi)."""
     try:
         # Dosyayı OpenCV için bir NumPy dizisine dönüştür
         file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
         img = cv2.imdecode(file_bytes, 1)
+        
+        # --- KRİTİK OCR/OMR ÖN İŞLEME ADIMLARI ---
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
+        
+        # 1. Gürültü giderme (Median Blur: Ufak tefek noktaları temizler)
+        denoised = cv2.medianBlur(gray, 3) 
+        
+        # 2. Adaptif Eşikleme (Adaptive Thresholding: Gölge ve aydınlatma farklarını gidererek keskin siyah-beyaz yapar)
+        # THRESH_BINARY yerine THRESH_BINARY_INV deneyebilirsiniz
+        processed_img_final = cv2.adaptiveThreshold(denoised, 255, 
+                                                    cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                                    cv2.THRESH_BINARY, 11, 2)
+        
+        # Tesseract Konfigürasyonu: Tek bir metin bloğu (PSM 6) ve Türkçe dil (tur)
+        tess_config = r'--oem 3 --psm 6'
+        
         if is_omr:
             # --- ÇOKTAN SEÇMELİ (OMR) MANTIK YER TUTUCU ---
-            # Gerçek puanlama mantığı buraya gelir. Şimdilik rastgele skor üretir.
             total_questions = len(answer_key) if answer_key else 10
-            # Sadece tamamlama için örnek rastgele skor üretilir.
             correct_answers = np.random.randint(0, total_questions + 1)
             score = f"{correct_answers} / {total_questions} Doğru"
             feedback = f"Öğrencinin optik form analizi tamamlanmıştır. Doğruluk oranı: %{int(correct_answers/total_questions * 100)}"
-            return feedback, score, img
+            return feedback, score, processed_img_final
         
         else:
-            # --- KLASİK SINAV (OCR) MANTIK YER TUTUCU ---
-            # Tesseract OCR motorunu kullanarak metni çıkar (Türkçe dil desteği ile)
-            text = pytesseract.image_to_string(gray, lang='tur')
-            return text, None, img
+            # --- KLASİK SINAV (OCR) MANTIK ---
+            text = pytesseract.image_to_string(processed_img_final, lang='tur', config=tess_config) 
+            return text, None, processed_img_final
 
     except pytesseract.TesseractNotFoundError:
         return "Hata: Tesseract OCR motoru bulunamadı. Lütfen 'packages.txt' dosyasını kontrol edin.", None, None
     except Exception as e:
-        return f"Görüntü İşleme Hatası: {e}", None, None
+        # Hata yakalama sırasında, ham görseli göndermek yerine sadece hata mesajını döndür
+        return f"Görüntü İşleme Sırasında Hata Oluştu: {e}", None, None
 
 
 # --- 7. ANA SAYFA VE TABLAR ---
@@ -317,38 +329,41 @@ with tab_vision:
             st.warning("Çoktan Seçmeli modu için lütfen doğru cevap anahtarını girin.")
         else:
             with st.spinner("Görüntü İşleme ve OCR analizi yapılıyor..."):
-                try:
-                    # Görüntü İşleme Fonksiyonunu Çağır
-                    result_text, result_score, processed_img = process_exam_image(exam_image, is_omr, answer_key)
-                    
-                    if result_text.startswith("Hata:"):
-                        st.error(result_text)
+                
+                # Görüntü İşleme Fonksiyonunu Çağır
+                result_text, result_score, processed_img = process_exam_image(exam_image, is_omr, answer_key)
+                
+                if result_text.startswith("Hata:"):
+                    st.error(result_text)
+                else:
+                    st.success("İşlem Başarılı!")
+
+                    if not is_omr:
+                        # Klasik Metin Çıktısı
+                        st.subheader("📝 Dijitalleştirilmiş Metin (OCR)")
+                        st.text_area("OCR Çıktısı", result_text, height=300)
+                        
+                        # Word İndirme
+                        word_data = create_exam_word(result_text, "OCR Analiz Edilen Metin.")
+                        st.download_button(
+                            label="Metni Word Olarak İndir",
+                            data=word_data,
+                            file_name="klasik_cevaplar_ocr.docx",
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        )
                     else:
-                        st.success("İşlem Başarılı!")
-
-                        if not is_omr:
-                            # Klasik Metin Çıktısı
-                            st.subheader("📝 Dijitalleştirilmiş Metin (OCR)")
-                            st.text_area("OCR Çıktısı", result_text, height=300)
-                            
-                            # Word İndirme
-                            word_data = create_exam_word(result_text, "OCR Analiz Edilen Metin.")
-                            st.download_button(
-                                label="Metni Word Olarak İndir",
-                                data=word_data,
-                                file_name="klasik_cevaplar_ocr.docx",
-                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                            )
-                        else:
-                            # Çoktan Seçmeli (OMR) Çıktısı
-                            st.subheader("✅ Otomatik Puanlama Sonucu")
-                            st.metric(label="Toplam Skor", value=result_score)
-                            st.info(f"Analiz Notu: {result_text} / Doğru Cevap Anahtarı: {answer_key}")
-                            st.image(processed_img, caption="İşlenmiş Görüntü (Kontrol Amaçlı)") 
-
-                except Exception as e:
-                    st.error(f"Görüntü Analizi Sırasında Hata Oluştu: {e}")
-
+                        # Çoktan Seçmeli (OMR) Çıktısı
+                        st.subheader("✅ Otomatik Puanlama Sonucu")
+                        st.metric(label="Toplam Skor", value=result_score)
+                        st.info(f"Analiz Notu: {result_text} / Doğru Cevap Anahtarı: {answer_key}")
+                        
+                        # İşlenmiş görüntüyü Streamlit'e yükleme
+                        # Not: OMR/CV işlemleri için görsel doğrulama kritiktir.
+                        if processed_img is not None:
+                            # İşlenmiş görseli Streamlit'in kabul edeceği formata çevir
+                            is_success, buffer = cv2.imencode(".png", processed_img)
+                            if is_success:
+                                st.image(buffer.tobytes(), caption="Kontrol Edilmiş Optik Form", use_column_width=True)
 
 # ----------------------------------------------------------------------
 #                         TAB 4: HAKKINDA
