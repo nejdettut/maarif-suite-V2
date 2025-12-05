@@ -1,7 +1,5 @@
 streamlit
 google-generativeai
-streamlit
-google-generativeai
 groq
 python-docx
 opencv-python
