@@ -9,6 +9,15 @@ import cv2
 import numpy as np
 import pytesseract
 
+# --- TESSERACT PATH DÜZELTMESİ (Streamlit Cloud için kritik) ---
+# Tesseract'ın sistemdeki varsayılan yolunu kontrol eder ve ayarlar
+# Bu, "TesseractNotFoundError" hatasını engellemeye yardımcı olur.
+try:
+    # Streamlit Cloud varsayılan Tesseract yolu
+    pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
+except:
+    pass # Yerel çalışırken veya yol farklıysa hata vermesini engelle
+
 # --- 1. GÜVENLİK VE API AYARLARI ---
 
 GOOGLE_API_KEY = st.secrets.get("GOOGLE_API_KEY")
@@ -88,13 +97,14 @@ def process_exam_image(uploaded_file, is_omr, answer_key=""):
         # 1. Gürültü giderme (Median Blur: Ufak tefek noktaları temizler)
         denoised = cv2.medianBlur(gray, 3) 
         
-        # 2. Adaptif Eşikleme (Adaptive Thresholding: Gölge ve aydınlatma farklarını gidererek keskin siyah-beyaz yapar)
-        # THRESH_BINARY yerine THRESH_BINARY_INV deneyebilirsiniz
+        # 2. Adaptif Eşikleme (Adaptive Thresholding: Keskin siyah-beyaz yapar)
+        # Bu, el yazısı ve basılı metni ayırmakta kritiktir.
         processed_img_final = cv2.adaptiveThreshold(denoised, 255, 
                                                     cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
                                                     cv2.THRESH_BINARY, 11, 2)
         
-        # Tesseract Konfigürasyonu: Tek bir metin bloğu (PSM 6) ve Türkçe dil (tur)
+        # Tesseract Konfigürasyonu: PSM 6 (Tek birleşik metin bloğunu varsayar)
+        # Daha iyi el yazısı tanıma için psm 3 (Default) veya psm 6 kullanılmalıdır.
         tess_config = r'--oem 3 --psm 6'
         
         if is_omr:
@@ -113,7 +123,7 @@ def process_exam_image(uploaded_file, is_omr, answer_key=""):
     except pytesseract.TesseractNotFoundError:
         return "Hata: Tesseract OCR motoru bulunamadı. Lütfen 'packages.txt' dosyasını kontrol edin.", None, None
     except Exception as e:
-        # Hata yakalama sırasında, ham görseli göndermek yerine sadece hata mesajını döndür
+        # Hata yakalama sırasında, sadece hata mesajını döndür
         return f"Görüntü İşleme Sırasında Hata Oluştu: {e}", None, None
 
 
@@ -217,7 +227,7 @@ with tab_meeting:
     st.markdown("### 🎙️ Sesli Toplantı Tutanak Motoru")
     
     if 'meeting_tutanak' not in st.session_state: st.session_state.meeting_tutanak = None
-    if 'meeting_transkript' not in st.session_state: st.session_state.meeting_transkript = None
+    if 'meeting_transkript' not in st.session_state.meeting_transkript = None
     
     col_upload, col_record = st.columns([1, 1])
     with col_upload:
@@ -333,7 +343,7 @@ with tab_vision:
                 # Görüntü İşleme Fonksiyonunu Çağır
                 result_text, result_score, processed_img = process_exam_image(exam_image, is_omr, answer_key)
                 
-                if result_text.startswith("Hata:"):
+                if result_text is not None and result_text.startswith("Hata:"):
                     st.error(result_text)
                 else:
                     st.success("İşlem Başarılı!")
@@ -357,10 +367,7 @@ with tab_vision:
                         st.metric(label="Toplam Skor", value=result_score)
                         st.info(f"Analiz Notu: {result_text} / Doğru Cevap Anahtarı: {answer_key}")
                         
-                        # İşlenmiş görüntüyü Streamlit'e yükleme
-                        # Not: OMR/CV işlemleri için görsel doğrulama kritiktir.
                         if processed_img is not None:
-                            # İşlenmiş görseli Streamlit'in kabul edeceği formata çevir
                             is_success, buffer = cv2.imencode(".png", processed_img)
                             if is_success:
                                 st.image(buffer.tobytes(), caption="Kontrol Edilmiş Optik Form", use_column_width=True)
@@ -374,21 +381,21 @@ with tab_about:
     st.subheader("👨‍💻 Geliştirici: Nejdet TUT")
     
     st.markdown(f"""
-    Merhaba, ben **Nejdet TUT**. Uzman bir **Bilişim Teknolojileri Öğretmeni** ve **EdTech Geliştiricisiyim**. Grafik tasarım kökenli bir teknoloji eğitimcisi olarak, **12 yılı aşkın öğretmenlik** tecrübemi Yapay Zeka ve Veri Bilimi ile birleştiriyorum.
+    Merhaba, ben **Nejdet TUT**. [cite_start]Uzman bir **Bilişim Teknolojileri Öğretmeni** [cite: 366, 374, 379] [cite_start]ve **EdTech Geliştiricisiyim**[cite: 162, 274]. [cite_start]Grafik tasarım kökenli bir teknoloji eğitimcisi olarak, **12 yılı aşkın öğretmenlik** tecrübemi Yapay Zeka ve Veri Bilimi ile birleştiriyorum[cite: 279, 379].
 
-    **Eğitim Bilgisi:** Trakya Üniversitesi'nden Bilgisayar ve Öğretim Teknolojileri Öğretmenliği bölümünden mezun oldum.
+    [cite_start]**Eğitim Bilgisi:** Trakya Üniversitesi'nden Bilgisayar ve Öğretim Teknolojileri Öğretmenliği bölümünden mezun oldum[cite: 365, 366, 376].
     """)
     
     st.subheader("💡 Proje Amacı: Öğretmen Verimliliğini Artırmak")
     st.markdown("""
     **Maarif Suite**, öğretmenlerin üzerindeki idari ve hazırlık yükünü hafifletmek için tasarlanmıştır. Uygulamanın temel hedefleri şunlardır:
-    * **Sınav Otomasyonu:** Gemini API gücüyle müfredata uyumlu sınav sorularını otomatik olarak oluşturarak hazırlık süresini **%90 oranında** azaltmak.
+    * [cite_start]**Sınav Otomasyonu:** Gemini API gücüyle müfredata uyumlu sınav sorularını otomatik olarak oluşturarak hazırlık süresini **%90 oranında** azaltmak[cite: 181].
     * **Zaman Yönetimi:** Toplantı ve ders dökümlerini anında analiz ederek profesyonel tutanaklar hazırlamak (Groq/Whisper ile).
     """)
     
     st.subheader("📞 İletişim Bilgileri")
     st.markdown(f"""
-    * **E-posta:** nejdettut@gmail.com
-    * **Telefon:** +90 507 795 79 36
-    * **LinkedIn:** [linkedin.com/in/nejdettut](https://www.linkedin.com/in/nejdettut)
+    * [cite_start]**E-posta:** nejdettut@gmail.com [cite: 164, 265, 362]
+    * [cite_start]**Telefon:** +90 507 795 79 36 [cite: 163, 265, 361]
+    * [cite_start]**LinkedIn:** [linkedin.com/in/nejdettut](https://www.linkedin.com/in/nejdettut) [cite: 266]
     """)
